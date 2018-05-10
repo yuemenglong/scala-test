@@ -1,6 +1,6 @@
 package pack
 
-import java.io.File
+import java.io.{File, InputStream}
 import java.util.jar.JarFile
 
 object Main {
@@ -23,14 +23,19 @@ object Main {
   }
 
   def scanLocalClass(): Map[String, String] = {
-    new File("..").listFiles().filter(_.getName.endsWith(".class"))
-      .foreach(println)
+    val currentDir = new File("").getAbsolutePath
+    new File(currentDir).listFiles().filter(_.getName.endsWith(".class"))
+      .foreach(f => println(f.getName))
+    null
+  }
+
+  def getFullNameFromClassFile(is: InputStream): String = {
     null
   }
 
   def main(args: Array[String]): Unit = {
-    scanJar("D:\\workspace\\scala\\scala-test\\target")
-      .foreach(println)
+    //    scanJar("D:\\workspace\\scala\\scala-test\\target")
+    //      .foreach(println)
     scanLocalClass()
   }
 }
