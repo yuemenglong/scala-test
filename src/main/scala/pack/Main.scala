@@ -1,13 +1,22 @@
 package pack
 
-import java.io.{File, InputStream}
+import java.io._
 import java.util.jar.JarFile
 
-object Main {
-  def scanJar(jarDir: String): Map[String, String] = {
-    val dir = new File(jarDir)
+import pack.jvm.common.StreamReader
+import pack.jvm.struct.ClassFile
+
+class Pack(libDir: String, clazzDir: String) {
+  val libMap: Map[String, String] = scanLibJar(libDir)
+  val clazzMap: Map[String, String] = scanLocalClass(clazzDir)
+
+  libMap.foreach(println)
+
+  // className=>jarPath
+  def scanLibJar(libDir: String): Map[String, String] = {
+    val dir = new File(libDir)
     if (!dir.isDirectory) {
-      throw new Exception(s"${jarDir} Not A Dir")
+      throw new Exception(s"${libDir} Not A Dir")
     }
     dir.listFiles().filter(_.getName.endsWith(".jar")).flatMap(file => {
       val jarFile = new JarFile(file)
@@ -22,20 +31,47 @@ object Main {
     }).toMap
   }
 
-  def scanLocalClass(): Map[String, String] = {
-    val currentDir = new File("").getAbsolutePath
+  // fileName=>className
+  def scanLocalClass(clazzDir: String): Map[String, String] = {
+    def getFullNameFromClassFile(is: InputStream): String = {
+      val sr = new StreamReader(is)
+      val cf = new ClassFile(sr)
+      is.close()
+      cf.name + ".class"
+    }
+
+    val currentDir = new File(clazzDir).getAbsolutePath
     new File(currentDir).listFiles().filter(_.getName.endsWith(".class"))
-      .foreach(f => println(f.getName))
-    null
+      .map(f => (f.getName, getFullNameFromClassFile(new FileInputStream(f))))
+      .toMap
   }
 
-  def getFullNameFromClassFile(is: InputStream): String = {
-    null
+  def checkBackup(): Unit = {
+    clazzMap.values.map(libMap(_)).toSet[String].foreach(path => {
+      println(path)
+      val backPath = s"${path}.bak"
+      if (!new File(backPath).exists()) {
+        exec(s"cp ${path} ${backPath}")
+      } else {
+        println(s"[${backPath}] Exists")
+      }
+    })
   }
+
+  def exec(cmd: String): Unit = {
+    println(cmd)
+    val ex = Runtime.getRuntime.exec(cmd); //添加要进行的命令，"cmd  /c
+    val br = new BufferedReader(new InputStreamReader(ex.getInputStream)) //虽然cmd命令可以直接输出，但是通过IO流技术可以保证对数据进行一个缓冲。
+    Stream.continually(br.readLine()).takeWhile(_ != null).foreach(println)
+  }
+}
+
+object Main {
 
   def main(args: Array[String]): Unit = {
-    //    scanJar("D:\\workspace\\scala\\scala-test\\target")
-    //      .foreach(println)
-    scanLocalClass()
+    val libDir = "D:\\workspace\\scala\\scala-test\\target"
+    val clazzDir = "D:\\workspace\\scala\\scala-test"
+    val p = new Pack(libDir, clazzDir)
+    p.checkBackup()
   }
 }
