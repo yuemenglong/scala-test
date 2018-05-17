@@ -68,10 +68,10 @@ object Main {
     //    val cr = new ContainerRequest(resource, null, null, priority)
     //    rmClient.addContainerRequest(cr)
     //    rmClient.addContainerRequest(cr)
-    val sleep = 60
-    println(s"Thread Sleep Start, ${sleep}")
-    Thread.sleep(sleep * 1000)
-    println("Thread Sleep Finish")
+//    val sleep = 60
+//    println(s"Thread Sleep Start, ${sleep}")
+//    Thread.sleep(sleep * 1000)
+//    println("Thread Sleep Finish")
 
     println("before unregisterApplicationMaster")
     rmClient.unregisterApplicationMaster(FinalApplicationStatus.SUCCEEDED, "", "")
