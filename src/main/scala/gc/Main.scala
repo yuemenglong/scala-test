@@ -3,6 +3,7 @@
 //import java.nio.ByteBuffer
 //import java.util
 //
+//-XX:-UseCompressedOops
 //object Main {
 //
 //  def main(args: Array[String]): Unit = {
