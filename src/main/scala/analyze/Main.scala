@@ -1,6 +1,6 @@
 package analyze
 
-import java.io.FileOutputStream
+import java.io.{File, FileOutputStream}
 
 import scala.io.Source
 
@@ -49,10 +49,25 @@ object Main {
     }).foreach(line => os.write(s"${line}\n".getBytes()))
   }
 
+  def dump(): Unit = {
+    val dir = Thread.currentThread().getContextClassLoader.getResource("xdr2/dump").getFile
+    val os = new FileOutputStream("D:/dump.csv")
+    new File(dir).listFiles().map(f => {
+      val items = f.getName.replace(".txt", "").split("[-_: ]")
+      val time = s"${items(0)}-${items(1)}-${items(2)} ${items(3)}:${items(4)}:${items(5)}"
+      val data = Source.fromFile(f).getLines().filter(line => line.contains("StatePusher") && !line.contains("$")).toArray
+      val Array(_, _, count, bytes, _) = data(0).split("""\s+""")
+      s"${time},${count},${bytes},${bytes.toDouble / count.toDouble}"
+    }).foreach(line => {
+      os.write(s"${line}\n".getBytes())
+    })
+  }
+
   def main(args: Array[String]): Unit = {
-    sendAndRecv("send")
-    sendAndRecv("recv")
-    gc()
-    gcutil()
+    //    sendAndRecv("send")
+    //    sendAndRecv("recv")
+    //    gc()
+    //    gcutil()
+    dump()
   }
 }
