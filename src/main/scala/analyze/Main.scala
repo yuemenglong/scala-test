@@ -13,7 +13,7 @@ object Main {
   def sendAndRecv(t: String): Unit = {
     //    2018-05-16 11:26:00,402 DEBUG DeamonSender YML Send count:295, bytes:62675
     val os = new FileOutputStream(s"D:/${t}.csv")
-    readSource(s"xdr2/${t}.txt").map(line => {
+    readSource(s"xdr3/${t}.txt").map(line => {
       val time = line.split(",")(0)
       val count = line.split(" ")(6).split(":")(1)
       val bytes = line.split(" ")(7).split(":")(1)
@@ -26,7 +26,7 @@ object Main {
     //    S0C    S1C    S0U    S1U      EC       EU        OC         OU       MC     MU    CCSC   CCSU   YGC     YGCT    FGC    FGCT     GCT
     //    2096640.0 2096640.0 14896.6  0.0   12583424.0 7319983.4   1536.0      95.5    21248.0 20445.0  0.0    0.0        2    0.016   1      0.081    0.098
     val os = new FileOutputStream("D:/gc.csv")
-    readSource("xdr2/gc.txt").zipWithIndex.map { case (line, no) =>
+    readSource("xdr3/gc.txt").zipWithIndex.map { case (line, no) =>
       (no / 3, line)
     }.toArray.groupBy(_._1).toArray.sortBy(_._1).map(_._2.map(_._2)).map(arr => {
       val Array(t, _, d) = arr
@@ -40,7 +40,7 @@ object Main {
     //    S0     S1     E      O      M     CCS    YGC     YGCT    FGC    FGCT     GCT
     //    0.00   0.00  14.60  26.91  94.80      -     83   46.644   193 4424.167 4470.811
     val os = new FileOutputStream("D:/gcutil.csv")
-    readSource("xdr2/gcutil.txt").zipWithIndex.map { case (line, no) =>
+    readSource("xdr3/gcutil.txt").zipWithIndex.map { case (line, no) =>
       (no / 3, line)
     }.toArray.groupBy(_._1).toArray.sortBy(_._1).map(_._2.map(_._2)).map(arr => {
       val Array(t, _, d) = arr
@@ -49,8 +49,22 @@ object Main {
     }).foreach(line => os.write(s"${line}\n".getBytes()))
   }
 
+  def cpu(): Unit = {
+    val os = new FileOutputStream("D:/cpu.csv")
+    readSource("xdr3/cpu.txt").zipWithIndex.map { case (line, no) =>
+      (no / 10, line)
+    }.toArray.groupBy(_._1).toArray.sortBy(_._1).map(_._2.map(_._2)).map(arr => {
+      val t = arr(0)
+      val data = arr(8)
+      val items = data.split("""\s+""").reverse
+      s"${t},${items(3)}"
+      //      s"${t},${items(7)},${items(9)},"
+    }).foreach(line => os.write(s"${line}\n".getBytes()))
+
+  }
+
   def dump(): Unit = {
-    val dir = Thread.currentThread().getContextClassLoader.getResource("xdr2/dump").getFile
+    val dir = Thread.currentThread().getContextClassLoader.getResource("xdr3/dump").getFile
     val os = new FileOutputStream("D:/dump.csv")
     new File(dir).listFiles().map(f => {
       val items = f.getName.replace(".txt", "").split("[-_: ]")
@@ -64,10 +78,11 @@ object Main {
   }
 
   def main(args: Array[String]): Unit = {
-    //    sendAndRecv("send")
-    //    sendAndRecv("recv")
-    //    gc()
-    //    gcutil()
-    dump()
+//    sendAndRecv("send")
+//    sendAndRecv("recv")
+//    gc()
+//    gcutil()
+    cpu()
+//    dump()
   }
 }
