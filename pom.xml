@@ -30,34 +30,12 @@
         <scala.version>2.11.12</scala.version>
     </properties>
     <dependencies>
-        <!--<dependency>-->
-        <!--<groupId>org.scala-lang</groupId>-->
-        <!--<artifactId>scala-library</artifactId>-->
-        <!--<version>${scala.version}</version>-->
-        <!--</dependency>-->
-        <!--<dependency>-->
-        <!--<groupId>org.scala-lang</groupId>-->
-        <!--<artifactId>scala-compiler</artifactId>-->
-        <!--<version>${scala.version}</version>-->
-        <!--</dependency>-->
-        <!--<dependency>-->
-        <!--<groupId>org.scala-lang</groupId>-->
-        <!--<artifactId>scala-reflect</artifactId>-->
-        <!--<version>${scala.version}</version>-->
-        <!--</dependency>-->
         <!-- https://mvnrepository.com/artifact/org.apache.zookeeper/zookeeper -->
         <!--<dependency>-->
         <!--<groupId>org.apache.zookeeper</groupId>-->
         <!--<artifactId>zookeeper</artifactId>-->
         <!--<version>3.4.6</version>-->
         <!--</dependency>-->
-        <!--&lt;!&ndash; https://mvnrepository.com/artifact/org.rocksdb/rocksdbjni &ndash;&gt;-->
-        <!--<dependency>-->
-        <!--<groupId>org.rocksdb</groupId>-->
-        <!--<artifactId>rocksdbjni</artifactId>-->
-        <!--<version>5.11.3</version>-->
-        <!--</dependency>-->
-        <!-- https://mvnrepository.com/artifact/mysql/mysql-connector-java -->
         <!-- https://mvnrepository.com/artifact/org.apache.hadoop/hadoop-yarn-common -->
         <dependency>
             <groupId>org.apache.hadoop</groupId>
@@ -85,11 +63,6 @@
             <groupId>org.apache.hadoop</groupId>
             <artifactId>hadoop-hdfs</artifactId>
             <version>2.9.0</version>
-        </dependency>
-        <dependency>
-            <groupId>com.carrotsearch</groupId>
-            <artifactId>java-sizeof</artifactId>
-            <version>0.0.5</version>
         </dependency>
 
         <!-- https://mvnrepository.com/artifact/commons-net/commons-net -->
@@ -170,7 +143,7 @@
                     <archive>
                         <manifest>
                             <!-- 此处指定main方法入口的class -->
-                            <mainClass>yarn.Main</mainClass>
+                            <mainClass>sleep.Main</mainClass>
                         </manifest>
                     </archive>
                 </configuration>
