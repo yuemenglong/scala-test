@@ -52,26 +52,31 @@ case class Mod(root: String, mod: String, list: String, items: Array[ModItem]) {
     s"[${ty}][${item.id}]_${item.name}"
   }
 
+
   def pickTo(dir: String): Unit = {
     if (!new File(dir).isDirectory) {
       throw new Exception(s"[${dir}] Not Dir")
     }
-    val zipFile = Paths.get(dir, name + ".zip").toFile
-    if (zipFile.exists()) {
-      println(s"${zipFile} Exists")
-//      return
+    val dstDir = Paths.get(dir, name).toFile
+    if (dstDir.exists()) {
+      println(s"${dstDir} Exists")
+      FileUtils.deleteDirectory(dstDir)
     }
-    val out = new ZipOutputStream(new FileOutputStream(zipFile))
-    // mod, list, thumbs
-    zip(root, mod, out)
-    zip(root, list, out)
+
+    def cp(from: String): Unit = {
+      val rel = Paths.get(root).relativize(Paths.get(from))
+      val to = Paths.get(dir, name, rel.toString)
+      to.toFile.getParentFile.mkdirs()
+      FileUtils.copyFile(new File(from), to.toFile)
+    }
+
+    cp(mod)
+    cp(list)
     items.foreach(item => {
       if (item.thumb != null) {
-        zip(root, item.thumb, out)
+        cp(item.thumb)
       }
     })
-    out.close()
-    println(s"Pick ${name} Succ")
   }
 
   def zip(root: String, file: String, out: ZipOutputStream): Unit = {
@@ -129,13 +134,13 @@ object Main {
       Mod(from, mod.getAbsolutePath, list.getAbsolutePath, items)
     })
     mods.foreach(m => {
-      m.pickTo(from)
+      m.pickTo(to)
     })
   }
 
   def main(args: Array[String]): Unit = {
     val p = "C:\\Users\\yml\\Desktop\\playhome"
-    pick(p, p)
+    pick(p, p + "/pick")
     //    val dir = "/pcs"
     //    val newest = PCS.exec(s"ls ${dir} -time -desc").slice(4, 5)
     //    PCS.download("/pcs/PH3.0/ -p 1000")
