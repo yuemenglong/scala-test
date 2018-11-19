@@ -6,7 +6,10 @@ import java.nio.ByteBuffer
 import java.nio.channels.{SelectionKey, Selector, ServerSocketChannel, SocketChannel}
 import java.util
 
+import redis.clients.jedis.{JedisShardInfo, ShardedJedis, ShardedJedisPool}
+
 import scala.collection.mutable.ArrayBuffer
+import scala.collection.JavaConversions._
 
 case class AcceptAttach(fn: Channel => Unit)
 
@@ -357,6 +360,38 @@ class RedisProtocal {
 object Main {
 
   def main(args: Array[String]): Unit = {
+    new Thread(new Runnable {
+      override def run(): Unit = {
+        Thread.sleep(1000)
+
+
+        {
+          val shard = new JedisShardInfo("localhost", 6666)
+          val jedis = new ShardedJedis(util.Arrays.asList(shard))
+          val pipeline = jedis.pipelined()
+          pipeline.set("a", "1")
+          pipeline.get("a")
+          val res = pipeline.getResults
+          res.foreach(o => {
+            o.asInstanceOf[Array[Byte]].foreach(println)
+          })
+        }
+        println()
+          //
+
+        {
+          val shard = new JedisShardInfo("localhost", 6379)
+          val jedis = new ShardedJedis(util.Arrays.asList(shard))
+          val pipeline = jedis.pipelined()
+          pipeline.set("a", "1")
+          pipeline.get("a")
+          val res = pipeline.getResults
+          res.foreach(o => {
+            o.asInstanceOf[Array[Byte]].foreach(println)
+          })
+        }
+      }
+    }).start()
     val nio = new Nio
     var serverCh: Channel = null
     var clientCh: Channel = null
