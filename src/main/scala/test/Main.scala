@@ -1,10 +1,10 @@
 package test
 
+import java.io.ByteArrayOutputStream
 import java.net.InetSocketAddress
 import java.nio.ByteBuffer
 import java.nio.channels.{SelectionKey, Selector, ServerSocketChannel, SocketChannel}
 
-import scala.collection.immutable.TreeMap
 import scala.collection.mutable.ArrayBuffer
 
 case class AcceptAttach(fn: Channel => Unit)
@@ -129,6 +129,7 @@ class Channel(key: SelectionKey) {
   //noinspection ScalaUnnecessaryParentheses
   var readFn: ByteBuffer => Unit = (_ => {})
   var closeFn: () => Unit = () => {}
+  private var _attachment: Object = _
 
   def onRead(fn: ByteBuffer => Unit): Unit = {
     readFn = fn
@@ -154,12 +155,182 @@ class Channel(key: SelectionKey) {
   def onClose(fn: () => Unit): Unit = {
     closeFn = fn
   }
+
+  def attach(obj: Object): Unit = _attachment = obj
+
+  def attachment(): Object = _attachment
+}
+
+class InvalidArgsExecption extends RuntimeException("Invalid Args")
+
+class ProtoReader {
+
+  object ReaderState extends Enumeration {
+    type ReadState = Value
+    val ArgsCountP, ArgsCount, ArgsCountN,
+    ArgDataLenP, ArgDataLen, ArgDataLenN,
+    ArgData, ArgDataR, ArgDataN = Value
+  }
+
+  import ReaderState._
+
+  var state: ReaderState.Value = ArgsCountP
+  var argsCount: Int = 0
+  var argLen: Int = 0
+  var argData: ArrayBuffer[Array[Byte]] = new ArrayBuffer[Array[Byte]]()
+
+  def read(buf: ByteBuffer): Array[Array[Byte]] = {
+    while (buf.remaining() > 0) {
+      state match {
+        case ArgsCountP => buf.get() match {
+          case '*' => state = ArgsCount
+          case _ => throw new InvalidArgsExecption
+        }
+        case ArgsCount => buf.get() match {
+          case '\r' => state = ArgsCountN
+          case b => argsCount = argsCount * 10 + b - '0'
+        }
+        case ArgsCountN => buf.get() match {
+          case '\n' => state = ArgDataLenP
+          case _ => throw new InvalidArgsExecption
+        }
+        case ArgDataLenP => buf.get() match {
+          case '$' => state = ArgDataLen
+          case _ => throw new InvalidArgsExecption
+        }
+        case ArgDataLen => buf.get() match {
+          case '\r' => state = ArgDataLenN
+          case b => argLen = argLen * 10 + b - '0'
+        }
+        case ArgDataLenN => buf.get() match {
+          case '\n' => state = ArgData
+          case _ => throw new RuntimeException
+        }
+        case ArgData => buf.remaining() >= argLen match {
+          case true =>
+            val arg = new Array[Byte](argLen)
+            buf.get(arg)
+            argLen = 0
+            argData += arg
+            state = ArgDataR
+          case false => return null // 等数据全了在返回
+        }
+        case ArgDataR => buf.get() match {
+          case '\r' => state = ArgDataN
+          case _ => throw new RuntimeException
+        }
+        case ArgDataN => buf.get() match {
+          case '\n' => argsCount == argData.length match {
+            case false => state = ArgDataLenP //继续读
+            case true =>
+              argsCount = 0
+              state = ArgsCountP
+              val ret = argData.toArray
+              argData.clear
+              return ret
+          }
+          case _ => throw new RuntimeException
+        }
+      }
+    }
+    null
+  }
+}
+
+trait Reply {
+  //noinspection AccessorLikeMethodIsUnit
+  def getBytes(bs: ByteArrayOutputStream): Unit
+}
+
+case class SimpleStringReply(status: String = "OK") extends Reply {
+  override def getBytes(bs: ByteArrayOutputStream): Unit = {
+    bs.write(s"+${status}\r\n".getBytes())
+  }
+}
+
+case class ErrorReply(errType: String = "ERR", errMsg: String) extends Reply {
+  override def getBytes(bs: ByteArrayOutputStream): Unit = {
+    bs.write(s"-${errType} ${errMsg}\r\n".getBytes())
+  }
+}
+
+case class IntegerReply(value: Long) extends Reply {
+  override def getBytes(bs: ByteArrayOutputStream): Unit = {
+    bs.write(s":${value}\r\n".getBytes())
+  }
+}
+
+case class BulkStringReply(data: Array[Byte]) extends Reply {
+  override def getBytes(bs: ByteArrayOutputStream): Unit = {
+    data match {
+      case null => bs.write("*-1\r\n".getBytes())
+      case _ =>
+        bs.write(s"*${data.length}\r\n".getBytes())
+        bs.write(data)
+    }
+  }
+}
+
+case class ArrayReply(data: Array[Reply]) extends Reply {
+  override def getBytes(bs: ByteArrayOutputStream): Unit = {
+    data match {
+      case null => bs.write("*-1\r\n".getBytes())
+      case _ =>
+        bs.write(s"*${data.length}\r\n".getBytes())
+        data.foreach(_.getBytes(bs))
+    }
+  }
 }
 
 class RedisProtocal {
-  def handle(buf: ByteBuffer): ByteBuffer = {
-    null
+
+  var buf: ByteBuffer = _
+  var reader: ProtoReader = new ProtoReader
+
+  def handle(buffer: ByteBuffer): ByteBuffer = {
+    this.buf = this.buf match {
+      case null => buffer
+      case _ =>
+        this.buf.mark()
+        this.buf.put(buffer)
+        this.buf.reset()
+        this.buf
+    }
+    val bs = new ByteArrayOutputStream()
+    Stream.continually({
+      reader.read(this.buf)
+    }).takeWhile(_ != null).map(args => {
+      val cmd = new String(args(0)).toUpperCase()
+      val ret: Reply = cmd match {
+        case "COMMAND" => command()
+        case "GET" => get(new String(args(1)))
+        case "SET" => set(new String(args(1)), args(2))
+        case "DEL" => del(new String(args(1)))
+      }
+      ret
+    }).foreach(_.getBytes(bs))
+    if (this.buf.remaining() == 0) {
+      this.buf = null
+    }
+    ByteBuffer.wrap(bs.toByteArray)
   }
+
+  def command(): ArrayReply = {
+    ArrayReply(null)
+  }
+
+  def set(key: String, value: Array[Byte]): SimpleStringReply = {
+    SimpleStringReply()
+  }
+
+  def get(key: String): BulkStringReply = {
+    BulkStringReply(null)
+  }
+
+  def del(key: String): SimpleStringReply = {
+    SimpleStringReply()
+  }
+
 }
 
 object Main {
@@ -179,10 +350,13 @@ object Main {
     nio.doAccept(new InetSocketAddress(6666), (channel: Channel) => {
       //      println("Accept")
       clientCh = channel
-      channel.onRead((buffer: ByteBuffer) => {
-        buffer.array().take(buffer.limit()).map(_.toChar).foreach(print)
-        //        serverCh.doWrite(buffer)
-        channel.doWrite(ByteBuffer.wrap("*0\r\n".getBytes()))
+      channel.attach(new RedisProtocal)
+      channel.onRead((req: ByteBuffer) => {
+        req.array().take(req.limit()).map(_.toChar).foreach(print)
+        //        serverCh.doWrite(req)
+        val res = channel.attachment().asInstanceOf[RedisProtocal].handle(req)
+        res.array().take(res.limit()).map(_.toChar).foreach(print)
+        channel.doWrite(res)
       })
     })
     nio.loop()
