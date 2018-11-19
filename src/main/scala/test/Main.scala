@@ -4,6 +4,7 @@ import java.io.ByteArrayOutputStream
 import java.net.InetSocketAddress
 import java.nio.ByteBuffer
 import java.nio.channels.{SelectionKey, Selector, ServerSocketChannel, SocketChannel}
+import java.util
 
 import scala.collection.mutable.ArrayBuffer
 
@@ -263,10 +264,11 @@ case class IntegerReply(value: Long) extends Reply {
 case class BulkStringReply(data: Array[Byte]) extends Reply {
   override def getBytes(bs: ByteArrayOutputStream): Unit = {
     data match {
-      case null => bs.write("*-1\r\n".getBytes())
+      case null => bs.write("$-1\r\n".getBytes())
       case _ =>
-        bs.write(s"*${data.length}\r\n".getBytes())
+        bs.write(s"$$${data.length}\r\n".getBytes())
         bs.write(data)
+        bs.write("\r\n".getBytes())
     }
   }
 }
@@ -279,6 +281,22 @@ case class ArrayReply(data: Array[Reply]) extends Reply {
         bs.write(s"*${data.length}\r\n".getBytes())
         data.foreach(_.getBytes(bs))
     }
+  }
+}
+
+object RedisStore {
+  private val map: util.HashMap[String, Object] = new util.HashMap[String, Object]()
+
+  def set(key: String, value: Array[Byte]): Unit = {
+    map.put(key, value)
+  }
+
+  def get(key: String): Array[Byte] = {
+    map.get(key).asInstanceOf[Array[Byte]]
+  }
+
+  def del(key: String): Unit = {
+    map.remove(key)
   }
 }
 
@@ -320,14 +338,17 @@ class RedisProtocal {
   }
 
   def set(key: String, value: Array[Byte]): SimpleStringReply = {
+    RedisStore.set(key, value)
     SimpleStringReply()
   }
 
   def get(key: String): BulkStringReply = {
-    BulkStringReply(null)
+    val data = RedisStore.get(key)
+    BulkStringReply(data)
   }
 
   def del(key: String): SimpleStringReply = {
+    RedisStore.del(key)
     SimpleStringReply()
   }
 
