@@ -16,7 +16,7 @@ case class AcceptAttach(fn: Channel => Unit)
 
 case class ReadAttach(channel: Channel)
 
-case class WriteAttach(channel: Channel, buf: ByteBuffer)
+case class WriteAttach(channel: Channel)
 
 case class ConnAttach(channel: Channel, fn: Channel => Unit)
 
@@ -75,8 +75,8 @@ class Nio {
         //        }
       }
       else if (key.isWritable) {
-        val WriteAttach(ch, buf) = key.attachment()
-        ch.doWrite(buf)
+        val WriteAttach(ch) = key.attachment()
+        ch.doWrite()
         //        val channel = key.channel().asInstanceOf[SocketChannel]
         //        channel.write(buf)
         //        if (buf.remaining() == 0) {
@@ -136,7 +136,7 @@ class Nio {
   }
 }
 
-class Channel(key: SelectionKey) {
+class Channel(val key: SelectionKey) {
   final val BUF_SIZE = 4096
 
   val channel: SocketChannel = key.channel().asInstanceOf[SocketChannel]
@@ -146,6 +146,7 @@ class Channel(key: SelectionKey) {
   var closeFn: () => Unit = () => {}
   private var _attachment: Object = _
   private val _readBuf: ArrayBuffer[ByteBuffer] = new ArrayBuffer[ByteBuffer]()
+  private val _writeBuf: util.Deque[ByteBuffer] = new util.ArrayDeque[ByteBuffer]()
 
   def onRead(fn: ByteBuffer => Unit): Unit = {
     readFn = fn
@@ -168,13 +169,42 @@ class Channel(key: SelectionKey) {
     }
   }
 
-  def doWrite(buf: ByteBuffer): Unit = {
-    channel.write(buf)
-    if (buf.remaining() == 0) {
+  def doWrite(): Unit = {
+    // 立刻写优化
+    var cont = true
+    while (cont && _writeBuf.size() > 0) {
+      val buf = _writeBuf.peekFirst()
+      channel.write(buf)
+      if (buf.remaining() == 0) {
+        _writeBuf.pollFirst()
+      } else {
+        cont = false
+      }
+    }
+    if (_writeBuf.size() == 0) {
       key.attach(ReadAttach(this))
       key.interestOps(SelectionKey.OP_READ)
     } else {
-      key.attach(WriteAttach(this, buf))
+      key.attach(WriteAttach(this))
+      key.interestOps(SelectionKey.OP_WRITE)
+    }
+  }
+
+  def doWrite(buf: ByteBuffer): Unit = {
+    // 立刻写优化
+    if (_writeBuf.size() == 0) {
+      channel.write(buf)
+      if (buf.remaining() > 0) {
+        _writeBuf.addLast(buf)
+      }
+    } else {
+      _writeBuf.addLast(buf)
+    }
+    if (_writeBuf.size() == 0) {
+      key.attach(ReadAttach(this))
+      key.interestOps(SelectionKey.OP_READ)
+    } else {
+      key.attach(WriteAttach(this))
       key.interestOps(SelectionKey.OP_WRITE)
     }
   }
@@ -322,6 +352,9 @@ object RedisStatus {
   var reqCount: Long = 0
 
   var tmp: Array[Byte] = _
+
+  var gCh: Channel = _
+
 }
 
 object RedisStore {
@@ -484,8 +517,8 @@ object Main {
     var serverCh: Channel = null
     var clientCh: Channel = null
     nio.doConnect(new InetSocketAddress("localhost", 6379), (channel: Channel) => {
+      RedisStatus.gCh = channel
       serverCh = channel
-      println("server", serverCh)
       channel.onRead((buffer: ByteBuffer) => {
         clientCh.doWrite(buffer)
         //        println(">>>>")
@@ -494,11 +527,7 @@ object Main {
     })
     nio.doAccept(new InetSocketAddress(6666), (channel: Channel) => {
       clientCh = channel
-      println("client", clientCh)
       channel.attach(new RedisProtocal)
-      channel.onClose(() => {
-        println("client Close", clientCh)
-      })
       channel.onRead((req: ByteBuffer) => {
         //        println("<<<<")
         //        req.array().take(req.limit()).map(_.toChar).foreach(print)
