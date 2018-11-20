@@ -1,6 +1,6 @@
 package test
 
-import java.io.ByteArrayOutputStream
+import java.io.{ByteArrayOutputStream, FileOutputStream, IOException}
 import java.net.InetSocketAddress
 import java.nio.ByteBuffer
 import java.nio.channels.{SelectionKey, Selector, ServerSocketChannel, SocketChannel}
@@ -10,6 +10,7 @@ import redis.clients.jedis.{JedisShardInfo, ShardedJedis, ShardedJedisPool}
 
 import scala.collection.mutable.ArrayBuffer
 import scala.collection.JavaConversions._
+import scala.collection.mutable
 
 case class AcceptAttach(fn: Channel => Unit)
 
@@ -57,24 +58,31 @@ class Nio {
         fn(ch)
       } else if (key.isReadable) {
         val ReadAttach(ch) = key.attachment()
-        val channel = key.channel().asInstanceOf[SocketChannel]
-        val buf = ByteBuffer.allocate(1024)
-        channel.read(buf) match {
-          case 0 =>
-          case n if n < 0 =>
-            ch.doClose()
-          case n if n > 0 =>
-            buf.flip()
-            ch.readFn(buf)
-        }
-      } else if (key.isWritable) {
+        ch.doRead()
+        //        val channel = key.channel().asInstanceOf[SocketChannel]
+        //        val buf = ByteBuffer.allocate(BUF_SIZE)
+        //        try {
+        //          channel.read(buf) match {
+        //            case 0 =>
+        //            case n if n < 0 =>
+        //              ch.doClose()
+        //            case n if n > 0 =>
+        //              buf.flip()
+        //              ch.readFn(buf)
+        //          }
+        //        } catch {
+        //          case _: IOException => ch.doClose()
+        //        }
+      }
+      else if (key.isWritable) {
         val WriteAttach(ch, buf) = key.attachment()
-        val channel = key.channel().asInstanceOf[SocketChannel]
-        channel.write(buf)
-        if (buf.remaining() == 0) {
-          key.attach(ReadAttach(ch))
-          key.interestOps(SelectionKey.OP_READ)
-        }
+        ch.doWrite(buf)
+        //        val channel = key.channel().asInstanceOf[SocketChannel]
+        //        channel.write(buf)
+        //        if (buf.remaining() == 0) {
+        //          key.attach(ReadAttach(ch))
+        //          key.interestOps(SelectionKey.OP_READ)
+        //        }
       }
     }
   }
@@ -85,7 +93,9 @@ class Nio {
     Stream.continually({
       iter.hasNext match {
         case true => iter.next() match {
-          case e if e.getKey <= now => e.getValue
+          case e if e.getKey <= now =>
+            iter.remove()
+            e.getValue
           case _ => null
         }
         case false => null
@@ -127,6 +137,7 @@ class Nio {
 }
 
 class Channel(key: SelectionKey) {
+  final val BUF_SIZE = 4096
 
   val channel: SocketChannel = key.channel().asInstanceOf[SocketChannel]
 
@@ -134,19 +145,37 @@ class Channel(key: SelectionKey) {
   var readFn: ByteBuffer => Unit = (_ => {})
   var closeFn: () => Unit = () => {}
   private var _attachment: Object = _
+  private val _readBuf: ArrayBuffer[ByteBuffer] = new ArrayBuffer[ByteBuffer]()
 
   def onRead(fn: ByteBuffer => Unit): Unit = {
     readFn = fn
   }
 
+  def doRead(): Unit = {
+    val channel = key.channel().asInstanceOf[SocketChannel]
+    val buf = ByteBuffer.allocate(BUF_SIZE)
+    try {
+      val len = channel.read(buf)
+      len match {
+        case 0 =>
+        case n if n < 0 => throw new IOException("Read <0 And Close")
+        case n if n > 0 =>
+          buf.flip()
+          readFn(buf)
+      }
+    } catch {
+      case _: IOException => doClose()
+    }
+  }
+
   def doWrite(buf: ByteBuffer): Unit = {
     channel.write(buf)
-    if (buf.remaining() != 0) {
-      key.attach(WriteAttach(this, buf))
-      key.interestOps(SelectionKey.OP_WRITE)
-    } else {
+    if (buf.remaining() == 0) {
       key.attach(ReadAttach(this))
       key.interestOps(SelectionKey.OP_READ)
+    } else {
+      key.attach(WriteAttach(this, buf))
+      key.interestOps(SelectionKey.OP_WRITE)
     }
   }
 
@@ -166,6 +195,8 @@ class Channel(key: SelectionKey) {
 }
 
 class InvalidArgsExecption extends RuntimeException("Invalid Args")
+
+class QuitExecption extends RuntimeException()
 
 class ProtoReader {
 
@@ -287,7 +318,14 @@ case class ArrayReply(data: Array[Reply]) extends Reply {
   }
 }
 
+object RedisStatus {
+  var reqCount: Long = 0
+
+  var tmp: Array[Byte] = _
+}
+
 object RedisStore {
+
   private val map: util.HashMap[String, Object] = new util.HashMap[String, Object]()
 
   def set(key: String, value: Array[Byte]): Unit = {
@@ -295,11 +333,62 @@ object RedisStore {
   }
 
   def get(key: String): Array[Byte] = {
-    map.get(key).asInstanceOf[Array[Byte]]
+    map.getOrDefault(key, null).asInstanceOf[Array[Byte]]
   }
 
-  def del(key: String): Unit = {
-    map.remove(key)
+  def del(key: String): Int = {
+    map.remove(key) match {
+      case null => 0
+      case _ => 1
+    }
+  }
+
+  def sadd(key: String, value: Array[Byte]): Int = {
+    RedisStatus.tmp = value
+    val ret = map.get(key) match {
+      case null =>
+        val s = new util.HashSet[ByteBuffer]()
+        map.put(key, s)
+        s.add(ByteBuffer.wrap(value))
+      case s: util.HashSet[ByteBuffer] => s.add(ByteBuffer.wrap(value))
+      case _ => throw new InvalidArgsExecption
+    }
+    ret match {
+      case true => 1
+      case false => 0
+    }
+  }
+
+  def smember(key: String): Set[Array[Byte]] = {
+    map.get(key) match {
+      case null => Set()
+      case s: util.HashSet[ByteBuffer] => s.toSet[ByteBuffer].map(_.array())
+      case _ => throw new InvalidArgsExecption
+    }
+  }
+
+  def scard(key: String): Long = {
+    map.get(key) match {
+      case null => 0
+      case s: util.HashSet[ByteBuffer] => s.size()
+      case _ => throw new InvalidArgsExecption
+    }
+  }
+
+  def srem(key: String, value: Array[Byte]): Int = {
+    val ret = map.get(key) match {
+      case null => false
+      case s: util.HashSet[ByteBuffer] => s.remove(ByteBuffer.wrap(value))
+      case _ => throw new InvalidArgsExecption
+    }
+    ret match {
+      case true => 1
+      case false => 0
+    }
+  }
+
+  def flushAll(): Unit = {
+    map.clear()
   }
 }
 
@@ -312,21 +401,28 @@ class RedisProtocal {
     this.buf = this.buf match {
       case null => buffer
       case _ =>
-        this.buf.mark()
-        this.buf.put(buffer)
-        this.buf.reset()
-        this.buf
+        val bs = new ByteArrayOutputStream()
+        bs.write(this.buf.array(), this.buf.position(), this.buf.remaining())
+        bs.write(buffer.array(), buffer.position(), buffer.remaining())
+        ByteBuffer.wrap(bs.toByteArray)
     }
     val bs = new ByteArrayOutputStream()
     Stream.continually({
       reader.read(this.buf)
     }).takeWhile(_ != null).map(args => {
+      RedisStatus.reqCount += 1
       val cmd = new String(args(0)).toUpperCase()
       val ret: Reply = cmd match {
         case "COMMAND" => command()
-        case "GET" => get(new String(args(1)))
         case "SET" => set(new String(args(1)), args(2))
+        case "GET" => get(new String(args(1)))
         case "DEL" => del(new String(args(1)))
+        case "SADD" => sadd(new String(args(1)), args(2))
+        case "SCARD" => scard(new String(args(1)))
+        case "SMEMBERS" => smembers(new String(args(1)))
+        case "SREM" => srem(new String(args(1)), args(2))
+        case "FLUSHALL" => flushAll()
+        case "QUIT" => throw new QuitExecption
       }
       ret
     }).foreach(_.getBytes(bs))
@@ -350,129 +446,74 @@ class RedisProtocal {
     BulkStringReply(data)
   }
 
-  def del(key: String): SimpleStringReply = {
-    RedisStore.del(key)
-    SimpleStringReply()
+  def del(key: String): IntegerReply = {
+    val ret = RedisStore.del(key)
+    IntegerReply(ret)
   }
 
+  def sadd(key: String, value: Array[Byte]): IntegerReply = {
+    val ret = RedisStore.sadd(key, value)
+    IntegerReply(ret)
+  }
+
+  def smembers(key: String): ArrayReply = {
+    val bulks = RedisStore.smember(key).map(BulkStringReply)
+    ArrayReply(bulks.toArray)
+  }
+
+  def scard(key: String): IntegerReply = {
+    val size = RedisStore.scard(key)
+    IntegerReply(size)
+  }
+
+  def srem(key: String, value: Array[Byte]): IntegerReply = {
+    val ret = RedisStore.srem(key, value)
+    IntegerReply(ret)
+  }
+
+  def flushAll(): SimpleStringReply = {
+    RedisStore.flushAll()
+    SimpleStringReply()
+  }
 }
 
 object Main {
 
   def main(args: Array[String]): Unit = {
-    new Thread(new Runnable {
-      override def run(): Unit = {
-        Thread.sleep(1000)
-
-
-        {
-          val shard = new JedisShardInfo("localhost", 6666)
-          val jedis = new ShardedJedis(util.Arrays.asList(shard))
-          val pipeline = jedis.pipelined()
-          pipeline.set("a", "1")
-          pipeline.get("a")
-          val res = pipeline.getResults
-          res.foreach(o => {
-            o.asInstanceOf[Array[Byte]].foreach(println)
-          })
-        }
-        println()
-          //
-
-        {
-          val shard = new JedisShardInfo("localhost", 6379)
-          val jedis = new ShardedJedis(util.Arrays.asList(shard))
-          val pipeline = jedis.pipelined()
-          pipeline.set("a", "1")
-          pipeline.get("a")
-          val res = pipeline.getResults
-          res.foreach(o => {
-            o.asInstanceOf[Array[Byte]].foreach(println)
-          })
-        }
-      }
-    }).start()
     val nio = new Nio
     var serverCh: Channel = null
     var clientCh: Channel = null
     nio.doConnect(new InetSocketAddress("localhost", 6379), (channel: Channel) => {
-      //      println("Conn")
       serverCh = channel
+      println("server", serverCh)
       channel.onRead((buffer: ByteBuffer) => {
-        buffer.array().take(buffer.limit()).map(_.toChar).foreach(print)
         clientCh.doWrite(buffer)
+        //        println(">>>>")
+        //        buffer.array().take(buffer.limit()).map(_.toChar).foreach(print)
       })
     })
     nio.doAccept(new InetSocketAddress(6666), (channel: Channel) => {
-      //      println("Accept")
       clientCh = channel
+      println("client", clientCh)
       channel.attach(new RedisProtocal)
+      channel.onClose(() => {
+        println("client Close", clientCh)
+      })
       channel.onRead((req: ByteBuffer) => {
-        req.array().take(req.limit()).map(_.toChar).foreach(print)
-        //        serverCh.doWrite(req)
-        val res = channel.attachment().asInstanceOf[RedisProtocal].handle(req)
-        res.array().take(res.limit()).map(_.toChar).foreach(print)
-        channel.doWrite(res)
+        //        println("<<<<")
+        //        req.array().take(req.limit()).map(_.toChar).foreach(print)
+        //        req.array().take(req.limit()).map(_.toInt).foreach(os.write)
+        try {
+          serverCh.doWrite(req)
+          //          val res = channel.attachment().asInstanceOf[RedisProtocal].handle(req)
+          //          channel.doWrite(res)
+          //          println(">>>>")
+          //          res.array().take(res.limit()).map(_.toChar).foreach(print)
+        } catch {
+          case _: QuitExecption => channel.doClose()
+        }
       })
     })
     nio.loop()
   }
-
-  //  val socket = new Socket
-  //
-  //  def handle(channel: SocketChannel, buf: ByteBuffer): ByteBuffer = {
-  //    buf.array().take(buf.position()).map(_.toChar).foreach(print)
-  //    socket.getOutputStream.write(buf.array().take(buf.position()))
-  //    val ret = new Array[Byte](1024 * 1024)
-  //    val len = socket.getInputStream.read(ret)
-  //    //    ret.take(len).map(_.toChar).foreach(print)
-  //    ByteBuffer.wrap(ret, 0, len)
-  //  }
-  //
-  //  def main2(args: Array[String]): Unit = {
-  //    socket.connect(new InetSocketAddress("localhost", 6379))
-  //    val selector = Selector.open()
-  //    val server = ServerSocketChannel.open()
-  //    server.configureBlocking(false)
-  //    server.bind(new InetSocketAddress(6666))
-  //    server.register(selector, SelectionKey.OP_ACCEPT)
-  //
-  //    while (true) {
-  //      selector.select()
-  //      val keys = selector.selectedKeys()
-  //      val iter = keys.iterator()
-  //      while (iter.hasNext) {
-  //        val key = iter.next()
-  //        iter.remove()
-  //        if (key.isAcceptable) {
-  //          val channel = server.accept()
-  //          channel.configureBlocking(false)
-  //          channel.register(selector, SelectionKey.OP_READ)
-  //        } else if (key.isReadable) {
-  //          val channel = key.channel().asInstanceOf[SocketChannel]
-  //          val buf = ByteBuffer.allocate(1024)
-  //          channel.read(buf) match {
-  //            case 0 =>
-  //            case n if n < 0 => channel.close()
-  //            case n if n > 0 =>
-  //              val ret = handle(channel, buf)
-  //              if (ret != null) {
-  //                channel.write(ret)
-  //                if (buf.remaining() != 0) {
-  //                  key.attach(buf)
-  //                  key.interestOps(SelectionKey.OP_WRITE)
-  //                }
-  //              }
-  //          }
-  //        } else if (key.isWritable) {
-  //          val channel = key.channel().asInstanceOf[SocketChannel]
-  //          val WriteAttach(ch, buf) = key.attachment()
-  //          channel.write(buf)
-  //          if (buf.remaining() == 0) {
-  //            key.interestOps(SelectionKey.OP_READ)
-  //          }
-  //        }
-  //      }
-  //    }
-  //  }
 }
