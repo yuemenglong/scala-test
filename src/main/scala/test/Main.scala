@@ -1,15 +1,13 @@
 package test
 
-import java.io.{ByteArrayOutputStream, FileOutputStream, IOException}
+import java.io.{ByteArrayOutputStream, IOException}
 import java.net.InetSocketAddress
 import java.nio.ByteBuffer
 import java.nio.channels.{SelectionKey, Selector, ServerSocketChannel, SocketChannel}
 import java.util
 
-import redis.clients.jedis.{JedisShardInfo, ShardedJedis, ShardedJedisPool}
-
-import scala.collection.mutable.ArrayBuffer
 import scala.collection.JavaConversions._
+import scala.collection.mutable.ArrayBuffer
 
 case class AcceptAttach(fn: Channel => Unit)
 
@@ -115,6 +113,7 @@ class Nio {
 
 class Channel(val key: SelectionKey) {
   final val BUF_SIZE = 4096
+  final val BUF_COUNT = 32
 
   val channel: SocketChannel = key.channel().asInstanceOf[SocketChannel]
 
@@ -218,13 +217,30 @@ class ProtoReader {
 
   import ReaderState._
 
+  var buf: ByteBuffer = _
   var state: ReaderState.Value = ArgsCountP
   var argsCount: Int = 0
   var argLen: Int = 0
   var argData: ArrayBuffer[Array[Byte]] = new ArrayBuffer[Array[Byte]]()
 
-  def read(buf: ByteBuffer): Array[Array[Byte]] = {
-    while (buf.remaining() > 0) {
+  def read(buffer: ByteBuffer): Stream[Array[Array[Byte]]] = {
+    buf = buf match {
+      case null => buffer
+      case _ =>
+        val bs = new ByteArrayOutputStream()
+        bs.write(buf.array(), buf.position(), buf.remaining())
+        bs.write(buffer.array(), buffer.position(), buffer.remaining())
+        ByteBuffer.wrap(bs.toByteArray)
+    }
+    val ret = Stream.continually(proc()).takeWhile(_ != null)
+    if (buf.remaining() == 0) {
+      buf = null
+    }
+    ret
+  }
+
+  def proc(): Array[Array[Byte]] = {
+    while (buf != null && buf.remaining() > 0) {
       state match {
         case ArgsCountP => buf.get() match {
           case '*' => state = ArgsCount
@@ -332,7 +348,7 @@ object RedisStatus {
 
   var writeBytes: Long = 0
 
-  var proto: RedisProtocal = _
+  var proto: RedisProto = _
 
   var gCh: Channel = _
 }
@@ -404,24 +420,21 @@ object RedisStore {
   }
 }
 
-class RedisProtocal {
+class RedisProto {
 
-  var buf: ByteBuffer = _
   var reader: ProtoReader = new ProtoReader
 
   def handle(buffer: ByteBuffer): ByteBuffer = {
-    this.buf = this.buf match {
-      case null => buffer
-      case _ =>
-        val bs = new ByteArrayOutputStream()
-        bs.write(this.buf.array(), this.buf.position(), this.buf.remaining())
-        bs.write(buffer.array(), buffer.position(), buffer.remaining())
-        ByteBuffer.wrap(bs.toByteArray)
-    }
+    //    this.buf = this.buf match {
+    //      case null => buffer
+    //      case _ =>
+    //        val bs = new ByteArrayOutputStream()
+    //        bs.write(this.buf.array(), this.buf.position(), this.buf.remaining())
+    //        bs.write(buffer.array(), buffer.position(), buffer.remaining())
+    //        ByteBuffer.wrap(bs.toByteArray)
+    //    }
     val bs = new ByteArrayOutputStream()
-    Stream.continually({
-      reader.read(this.buf)
-    }).takeWhile(_ != null).map(args => {
+    reader.read(buffer).map(args => {
       val cmd = new String(args(0)).toUpperCase()
       val ret: Reply = cmd match {
         case "COMMAND" => command()
@@ -437,9 +450,6 @@ class RedisProtocal {
       }
       ret
     }).foreach(_.getBytes(bs))
-    if (this.buf.remaining() == 0) {
-      this.buf = null
-    }
     ByteBuffer.wrap(bs.toByteArray)
   }
 
@@ -505,15 +515,15 @@ object Main {
     nio.doAccept(new InetSocketAddress(6666), (channel: Channel) => {
       RedisStatus.gCh = channel
       clientCh = channel
-      channel.attach(new RedisProtocal)
-      RedisStatus.proto = channel.attachment().asInstanceOf[RedisProtocal]
+      channel.attach(new RedisProto)
+      RedisStatus.proto = channel.attachment().asInstanceOf[RedisProto]
       channel.onRead((req: ByteBuffer) => {
         //        println("<<<<")
         //        req.array().take(req.limit()).map(_.toChar).foreach(print)
         //        req.array().take(req.limit()).map(_.toInt).foreach(os.write)
         try {
           //          serverCh.doWrite(req)
-          val res = channel.attachment().asInstanceOf[RedisProtocal].handle(req)
+          val res = channel.attachment().asInstanceOf[RedisProto].handle(req)
           channel.doWrite(res)
           //          println(">>>>")
           //          res.array().take(res.limit()).map(_.toChar).foreach(print)
