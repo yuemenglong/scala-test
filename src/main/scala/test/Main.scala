@@ -130,17 +130,28 @@ class Channel(val key: SelectionKey) {
 
   def doRead(): Unit = {
     val channel = key.channel().asInstanceOf[SocketChannel]
-    val buf = ByteBuffer.allocate(BUF_SIZE)
     try {
-      val len = channel.read(buf)
-      len match {
-        case 0 =>
-        case n if n < 0 => throw new IOException("Read <0 And Close")
-        case n if n > 0 =>
-          buf.flip()
-          RedisStatus.readBytes += buf.remaining()
-          readFn(buf)
+      var cont = true
+      while (cont && _readBuf.size < BUF_COUNT) {
+        val buf = ByteBuffer.allocate(BUF_SIZE)
+        val len = channel.read(buf)
+        len match {
+          case 0 => cont = false
+          case n if n < 0 => throw new IOException("Read <0 And Close")
+          case n if n > 0 =>
+            buf.flip()
+            //            readFn(buf)
+            _readBuf += buf
+        }
       }
+      _readBuf.size match {
+        case 0 =>
+        case 1 => readFn(_readBuf(0))
+        case _ => val bs = new ByteArrayOutputStream()
+          _readBuf.foreach(b => bs.write(b.array(), b.position(), b.remaining()))
+          readFn(ByteBuffer.wrap(bs.toByteArray))
+      }
+      _readBuf.clear()
     } catch {
       case _: IOException => doClose()
     }
@@ -168,7 +179,6 @@ class Channel(val key: SelectionKey) {
   }
 
   def doWrite(buf: ByteBuffer): Unit = {
-    RedisStatus.writeBytes += buf.remaining()
     // 立刻写优化
     if (_writeBuf.size() == 0) {
       channel.write(buf)
@@ -344,13 +354,6 @@ case class ArrayReply(data: Array[Reply]) extends Reply {
 }
 
 object RedisStatus {
-  var readBytes: Long = 0
-
-  var writeBytes: Long = 0
-
-  var proto: RedisProto = _
-
-  var gCh: Channel = _
 }
 
 object RedisStore {
@@ -425,14 +428,6 @@ class RedisProto {
   var reader: ProtoReader = new ProtoReader
 
   def handle(buffer: ByteBuffer): ByteBuffer = {
-    //    this.buf = this.buf match {
-    //      case null => buffer
-    //      case _ =>
-    //        val bs = new ByteArrayOutputStream()
-    //        bs.write(this.buf.array(), this.buf.position(), this.buf.remaining())
-    //        bs.write(buffer.array(), buffer.position(), buffer.remaining())
-    //        ByteBuffer.wrap(bs.toByteArray)
-    //    }
     val bs = new ByteArrayOutputStream()
     reader.read(buffer).map(args => {
       val cmd = new String(args(0)).toUpperCase()
@@ -513,10 +508,8 @@ object Main {
       })
     })
     nio.doAccept(new InetSocketAddress(6666), (channel: Channel) => {
-      RedisStatus.gCh = channel
       clientCh = channel
       channel.attach(new RedisProto)
-      RedisStatus.proto = channel.attachment().asInstanceOf[RedisProto]
       channel.onRead((req: ByteBuffer) => {
         //        println("<<<<")
         //        req.array().take(req.limit()).map(_.toChar).foreach(print)
