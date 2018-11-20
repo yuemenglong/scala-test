@@ -10,15 +10,12 @@ import redis.clients.jedis.{JedisShardInfo, ShardedJedis, ShardedJedisPool}
 
 import scala.collection.mutable.ArrayBuffer
 import scala.collection.JavaConversions._
-import scala.collection.mutable
 
 case class AcceptAttach(fn: Channel => Unit)
 
-case class ReadAttach(channel: Channel)
-
-case class WriteAttach(channel: Channel)
-
 case class ConnAttach(channel: Channel, fn: Channel => Unit)
+
+case class IOAttach(channel: Channel)
 
 //noinspection ConvertExpressionToSAM
 class Nio {
@@ -45,7 +42,7 @@ class Nio {
         channel.configureBlocking(false)
         val newKey = channel.register(selector, SelectionKey.OP_READ)
         val ch = new Channel(newKey)
-        newKey.attach(ReadAttach(ch))
+        newKey.attach(IOAttach(ch))
         fn(ch)
       } else if (key.isConnectable) {
         val ConnAttach(ch, fn) = key.attachment()
@@ -53,36 +50,16 @@ class Nio {
         if (channel.isConnectionPending) {
           channel.finishConnect
         }
-        key.attach(ReadAttach(ch))
+        key.attach(IOAttach(ch))
         key.interestOps(SelectionKey.OP_READ)
         fn(ch)
       } else if (key.isReadable) {
-        val ReadAttach(ch) = key.attachment()
+        val IOAttach(ch) = key.attachment()
         ch.doRead()
-        //        val channel = key.channel().asInstanceOf[SocketChannel]
-        //        val buf = ByteBuffer.allocate(BUF_SIZE)
-        //        try {
-        //          channel.read(buf) match {
-        //            case 0 =>
-        //            case n if n < 0 =>
-        //              ch.doClose()
-        //            case n if n > 0 =>
-        //              buf.flip()
-        //              ch.readFn(buf)
-        //          }
-        //        } catch {
-        //          case _: IOException => ch.doClose()
-        //        }
       }
       else if (key.isWritable) {
-        val WriteAttach(ch) = key.attachment()
+        val IOAttach(ch) = key.attachment()
         ch.doWrite()
-        //        val channel = key.channel().asInstanceOf[SocketChannel]
-        //        channel.write(buf)
-        //        if (buf.remaining() == 0) {
-        //          key.attach(ReadAttach(ch))
-        //          key.interestOps(SelectionKey.OP_READ)
-        //        }
       }
     }
   }
@@ -162,6 +139,7 @@ class Channel(val key: SelectionKey) {
         case n if n < 0 => throw new IOException("Read <0 And Close")
         case n if n > 0 =>
           buf.flip()
+          RedisStatus.readBytes += buf.remaining()
           readFn(buf)
       }
     } catch {
@@ -182,15 +160,16 @@ class Channel(val key: SelectionKey) {
       }
     }
     if (_writeBuf.size() == 0) {
-      key.attach(ReadAttach(this))
+      key.attach(IOAttach(this))
       key.interestOps(SelectionKey.OP_READ)
     } else {
-      key.attach(WriteAttach(this))
-      key.interestOps(SelectionKey.OP_WRITE)
+      key.attach(IOAttach(this))
+      key.interestOps(SelectionKey.OP_WRITE | SelectionKey.OP_READ)
     }
   }
 
   def doWrite(buf: ByteBuffer): Unit = {
+    RedisStatus.writeBytes += buf.remaining()
     // 立刻写优化
     if (_writeBuf.size() == 0) {
       channel.write(buf)
@@ -201,11 +180,11 @@ class Channel(val key: SelectionKey) {
       _writeBuf.addLast(buf)
     }
     if (_writeBuf.size() == 0) {
-      key.attach(ReadAttach(this))
+      key.attach(IOAttach(this))
       key.interestOps(SelectionKey.OP_READ)
     } else {
-      key.attach(WriteAttach(this))
-      key.interestOps(SelectionKey.OP_WRITE)
+      key.attach(IOAttach(this))
+      key.interestOps(SelectionKey.OP_WRITE | SelectionKey.OP_READ)
     }
   }
 
@@ -349,12 +328,13 @@ case class ArrayReply(data: Array[Reply]) extends Reply {
 }
 
 object RedisStatus {
-  var reqCount: Long = 0
+  var readBytes: Long = 0
 
-  var tmp: Array[Byte] = _
+  var writeBytes: Long = 0
+
+  var proto: RedisProtocal = _
 
   var gCh: Channel = _
-
 }
 
 object RedisStore {
@@ -377,7 +357,6 @@ object RedisStore {
   }
 
   def sadd(key: String, value: Array[Byte]): Int = {
-    RedisStatus.tmp = value
     val ret = map.get(key) match {
       case null =>
         val s = new util.HashSet[ByteBuffer]()
@@ -443,7 +422,6 @@ class RedisProtocal {
     Stream.continually({
       reader.read(this.buf)
     }).takeWhile(_ != null).map(args => {
-      RedisStatus.reqCount += 1
       val cmd = new String(args(0)).toUpperCase()
       val ret: Reply = cmd match {
         case "COMMAND" => command()
@@ -517,7 +495,6 @@ object Main {
     var serverCh: Channel = null
     var clientCh: Channel = null
     nio.doConnect(new InetSocketAddress("localhost", 6379), (channel: Channel) => {
-      RedisStatus.gCh = channel
       serverCh = channel
       channel.onRead((buffer: ByteBuffer) => {
         clientCh.doWrite(buffer)
@@ -526,16 +503,18 @@ object Main {
       })
     })
     nio.doAccept(new InetSocketAddress(6666), (channel: Channel) => {
+      RedisStatus.gCh = channel
       clientCh = channel
       channel.attach(new RedisProtocal)
+      RedisStatus.proto = channel.attachment().asInstanceOf[RedisProtocal]
       channel.onRead((req: ByteBuffer) => {
         //        println("<<<<")
         //        req.array().take(req.limit()).map(_.toChar).foreach(print)
         //        req.array().take(req.limit()).map(_.toInt).foreach(os.write)
         try {
-          serverCh.doWrite(req)
-          //          val res = channel.attachment().asInstanceOf[RedisProtocal].handle(req)
-          //          channel.doWrite(res)
+          //          serverCh.doWrite(req)
+          val res = channel.attachment().asInstanceOf[RedisProtocal].handle(req)
+          channel.doWrite(res)
           //          println(">>>>")
           //          res.array().take(res.limit()).map(_.toChar).foreach(print)
         } catch {
