@@ -353,9 +353,6 @@ case class ArrayReply(data: Array[Reply]) extends Reply {
   }
 }
 
-object RedisStatus {
-}
-
 object RedisStore {
 
   private val map: util.HashMap[String, Object] = new util.HashMap[String, Object]()
@@ -418,6 +415,32 @@ object RedisStore {
     }
   }
 
+  def incrBy(key: String, value: Array[Byte]): Long = {
+    map.get(key) match {
+      case null =>
+        map.put(key, value)
+        new String(value).toLong
+      case bs: Array[Byte] =>
+        val v = new String(bs).toLong + new String(value).toLong
+        map.put(key, v.toString.getBytes())
+        v
+      case _ => throw new InvalidArgsExecption
+    }
+  }
+
+  def decrBy(key: String, value: Array[Byte]): Long = {
+    map.get(key) match {
+      case null =>
+        map.put(key, value)
+        new String(value).toLong
+      case bs: Array[Byte] =>
+        val v = new String(bs).toLong - new String(value).toLong
+        map.put(key, v.toString.getBytes())
+        v
+      case _ => throw new InvalidArgsExecption
+    }
+  }
+
   def flushAll(): Unit = {
     map.clear()
   }
@@ -427,11 +450,10 @@ class RedisProto {
 
   var reader: ProtoReader = new ProtoReader
 
-  def handle(buffer: ByteBuffer): ByteBuffer = {
-    val bs = new ByteArrayOutputStream()
-    reader.read(buffer).map(args => {
+  def handleArgs(args: Array[Array[Byte]]): Reply = {
+    try {
       val cmd = new String(args(0)).toUpperCase()
-      val ret: Reply = cmd match {
+      cmd match {
         case "COMMAND" => command()
         case "SET" => set(new String(args(1)), args(2))
         case "GET" => get(new String(args(1)))
@@ -440,11 +462,22 @@ class RedisProto {
         case "SCARD" => scard(new String(args(1)))
         case "SMEMBERS" => smembers(new String(args(1)))
         case "SREM" => srem(new String(args(1)), args(2))
+        case "INCR" => incrBy(new String(args(1)), "1".getBytes())
+        case "INCRBY" => incrBy(new String(args(1)), args(2))
+        case "DECR" => decrBy(new String(args(1)), "1".getBytes())
+        case "DECRBY" => decrBy(new String(args(1)), args(2))
         case "FLUSHALL" => flushAll()
         case "QUIT" => throw new QuitExecption
       }
-      ret
-    }).foreach(_.getBytes(bs))
+    } catch {
+      case e: QuitExecption => throw e
+      case e: Throwable => ErrorReply(errMsg = e.getLocalizedMessage)
+    }
+  }
+
+  def handle(buffer: ByteBuffer): ByteBuffer = {
+    val bs = new ByteArrayOutputStream()
+    reader.read(buffer).map(handleArgs).foreach(_.getBytes(bs))
     ByteBuffer.wrap(bs.toByteArray)
   }
 
@@ -484,6 +517,16 @@ class RedisProto {
 
   def srem(key: String, value: Array[Byte]): IntegerReply = {
     val ret = RedisStore.srem(key, value)
+    IntegerReply(ret)
+  }
+
+  def incrBy(key: String, value: Array[Byte]): IntegerReply = {
+    val ret = RedisStore.incrBy(key, value)
+    IntegerReply(ret)
+  }
+
+  def decrBy(key: String, value: Array[Byte]): IntegerReply = {
+    val ret = RedisStore.decrBy(key, value)
     IntegerReply(ret)
   }
 
