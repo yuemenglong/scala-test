@@ -20,21 +20,7 @@ case class Landmark(root: JsonObj) {
   val face_rectangle: FaceRect = FaceRect(root.getObj("face").getObj("face_rectangle"))
   val landmark: JsonObj = root.getObj("face").getObj("landmark")
 
-  //  val kp = pickPoint(landmark.getObj("face"), "face_hairline", 144) ++
-  //    pickPoint(landmark.getObj("face"), "face_contour_right", 63) ++
-  //    pickPoint(landmark.getObj("face"), "face_contour_left", 63) ++
-  //    pickPoint(landmark.getObj("left_eyebrow"), "left_eyebrow", 63) ++
-  //    pickPoint(landmark.getObj("right_eyebrow"), "right_eyebrow", 63) ++
-  //    pickPoint(landmark.getObj("left_eye"), "left_eye", 62) ++
-  //    pickPoint(landmark.getObj("right_eye"), "right_eye", 62) ++
-  //    pickPoint(landmark.getObj("nose"), "nose_left", 62) ++
-  //    pickPoint(landmark.getObj("nose"), "nose_right", 62) ++
-  //    pickPoint(landmark.getObj("nose"), "nose_midline", 59) ++
-  //    pickPoint(landmark.getObj("mouth"), "upper_lip", 63) ++
-  //    pickPoint(landmark.getObj("mouth"), "lower_lip", 63) ++
-  //
-
-  val face_hireline: Array[(Int, Int)] = pickPoint(landmark.getObj("face"), "face_hairline", 144)
+  val face_hairline: Array[(Int, Int)] = pickPoint(landmark.getObj("face"), "face_hairline", 144)
   val face_contour_right: Array[(Int, Int)] = pickPoint(landmark.getObj("face"), "face_contour_right", 63)
   val face_contour_left: Array[(Int, Int)] = pickPoint(landmark.getObj("face"), "face_contour_left", 63)
   val left_eyebrow: Array[(Int, Int)] = pickPoint(landmark.getObj("left_eyebrow"), "left_eyebrow", 63)
@@ -50,7 +36,7 @@ case class Landmark(root: JsonObj) {
   val eyes: Array[(Int, Int, Int)] = Array(eye("left"), eye("right"))
 
   val points: Array[(Int, Int)] =
-    face_hireline ++
+    face_hairline ++
       face_contour_right ++
       face_contour_left ++
       left_eyebrow ++
@@ -62,6 +48,13 @@ case class Landmark(root: JsonObj) {
       nose_midline ++
       upper_lip ++
       lower_lip
+
+  val minX: Int = points.map(_._1).min
+  val minY: Int = points.map(_._2).min
+  val maxX: Int = points.map(_._1).max
+  val maxY: Int = points.map(_._2).max
+  val width: Int = maxX - minX
+  val height: Int = maxY - minY
 
   def eye(pre: String): (Int, Int, Int) = {
     val x = landmark.getObj(s"${pre}_eye").getObj(s"${pre}_eye_pupil_center").getInt("x").toInt
@@ -121,38 +114,5 @@ object FacePP {
     val res = client.httpForm(url, form)
     println(res.getBody)
     Landmark(JSON.parse(res.getBody).asObj())
-  }
-
-  def splitName(p: String): (String, String) = {
-    val Array(m) = """(.*)\.([^.]+)""".r.findAllMatchIn(p).toArray
-    val name = m.group(1)
-    val ext = m.group(2)
-    (name, ext)
-  }
-
-  def watch(dir: String, target: String): Unit = {
-    val set = mutable.Set[String]()
-    while (true) {
-      val nfs = new File(dir).listFiles().filter(f => !set.contains(f.getAbsolutePath))
-      println(s"New Files: ${nfs.length}")
-      if (set.nonEmpty) {
-        set ++= nfs.map(file => {
-          val ret = compare(file.getAbsolutePath, target).toString.replace(".", "_")
-          val (name, ext) = splitName(file.getAbsolutePath)
-          val newName = s"${name}-${ret}.${ext}"
-          file.renameTo(new File(newName))
-          newName
-        })
-      } else {
-        set ++= nfs.map(_.getAbsolutePath)
-      }
-      Thread.sleep(1000)
-    }
-  }
-
-
-  def main(args: Array[String]): Unit = {
-    //    compare("D:/pic/cym1.jpg", "D:/pic/ym1.jpg")
-    watch("D:/pic", "D:/pic/ym1.jpg")
   }
 }

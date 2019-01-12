@@ -1,15 +1,9 @@
 package opencv
 
-import java.io.File
-import java.nio.file.Paths
-
 import nu.pattern.OpenCV
 import org.opencv.core._
 import org.opencv.imgcodecs.Imgcodecs
 import org.opencv.imgproc.Imgproc
-import io.github.yuemenglong.http.HttpClient
-import io.github.yuemenglong.json.JSON
-import io.github.yuemenglong.json.parse.JsonObj
 
 object CV {
   OpenCV.loadLocally()
@@ -19,45 +13,60 @@ object CV {
   val BLACK: Scalar = new Scalar(0, 0, 0)
   val WHITE: Scalar = new Scalar(255, 255, 255)
 
-  def main(args: Array[String]): Unit = {
-    //    compare("D:/fbb1.jpg", "D:/fbb2.jpg")
-    //    keyPoint("D:/gxt3.jpg", "D:/gxt31.jpg")
-    val p = "D:/pic/cym1.jpg"
-    val lm = FacePP.landmark(p)
-    drawLandmark(lm, p)
-  }
-
-  def drawLandmark(landmark: Landmark, in: String): Unit = {
+  def outPath(in: String): String = {
     val Array(m) = """(.*)\.([^.]+)""".r.findAllMatchIn(in).toArray
     val name = m.group(1)
     val ext = m.group(2)
     val out = s"${name}-out.${ext}"
-    val outBlank = s"${name}-out-blank.${ext}"
-
-    val mat = Imgcodecs.imread(in)
-    landmark.points.foreach { case (x, y) =>
-      Imgproc.circle(mat, new Point(x, y), 1, RED)
-    }
-    landmark.eyes.foreach { case (x, y, r) =>
-      Imgproc.circle(mat, new Point(x, y), r, RED)
-    }
-    Imgcodecs.imwrite(out, mat)
-
-    mat.setTo(WHITE)
-    landmark.points.foreach { case (x, y) =>
-      Imgproc.circle(mat, new Point(x, y), 1, RED)
-    }
-    landmark.eyes.foreach { case (x, y, r) =>
-      Imgproc.circle(mat, new Point(x, y), r, RED)
-    }
-    Imgcodecs.imwrite(outBlank, mat)
+    out
   }
 
-  def cv(): Unit = {
-    OpenCV.loadLocally()
-    val mat = Imgcodecs.imread("D:/a.png")
-    Imgproc.line(mat, new Point(0, 0), new Point(200, 300), new Scalar(255, 0, 0))
-    Imgcodecs.imwrite("D:/b.png", mat)
+  def outFacePath(in: String): String = {
+    val Array(m) = """(.*)\.([^.]+)""".r.findAllMatchIn(in).toArray
+    val name = m.group(1)
+    val ext = m.group(2)
+    val outFace = s"${name}-out-face.${ext}"
+    outFace
+  }
+
+  def drawLandmark(landmark: Landmark, in: String, color: Scalar = RED): Array[String] = {
+    val out = outPath(in)
+    val outFace = outFacePath(in)
+
+    {
+      val mat = Imgcodecs.imread(in)
+      landmark.points.foreach { case (x, y) =>
+        Imgproc.circle(mat, new Point(x, y), 1, color)
+      }
+      landmark.eyes.foreach { case (x, y, r) =>
+        Imgproc.circle(mat, new Point(x, y), r, color)
+      }
+      Imgcodecs.imwrite(out, mat)
+    }
+
+    {
+      val size = new Size(landmark.width, landmark.height)
+      val left = landmark.minX
+      val top = landmark.minY
+      val mat = new Mat(size, CvType.CV_64FC3, WHITE)
+      landmark.points.foreach { case (x, y) =>
+        val xx = x - left
+        val yy = y - top
+        Imgproc.circle(mat, new Point(xx, yy), 1, color)
+      }
+      landmark.eyes.foreach { case (x, y, r) =>
+        val xx = x - left
+        val yy = y - top
+        Imgproc.circle(mat, new Point(xx, yy), r, color)
+      }
+      val resized = new Mat
+      val resizeHeight = 1440
+      val resizeWidth = (size.width * 1.0 / size.height * resizeHeight).toInt
+      Imgproc.resize(mat, resized, new Size(resizeWidth, resizeHeight))
+      Imgcodecs.imwrite(outFace, resized)
+    }
+
+    Array(out, outFace)
   }
 
   def drawPoint(in: String, out: String, points: (Int, Int)*): Unit = {
