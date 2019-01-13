@@ -6,8 +6,7 @@ import io.github.yuemenglong.http.HttpClient
 import io.github.yuemenglong.json.JSON
 import io.github.yuemenglong.json.parse.JsonObj
 import nu.pattern.OpenCV
-
-import scala.collection.mutable
+import org.opencv.core.Rect
 
 case class FaceRect(root: JsonObj) {
   val top: Int = root.getInt("top")
@@ -49,12 +48,37 @@ case class Landmark(root: JsonObj) {
       upper_lip ++
       lower_lip
 
-  val minX: Int = points.map(_._1).min
-  val minY: Int = points.map(_._2).min
-  val maxX: Int = points.map(_._1).max
-  val maxY: Int = points.map(_._2).max
-  val width: Int = maxX - minX
-  val height: Int = maxY - minY
+  val face_rect: Rect = {
+    val minX: Int = points.map(_._1).min
+    val minY: Int = points.map(_._2).min
+    val maxX: Int = points.map(_._1).max
+    val maxY: Int = points.map(_._2).max
+    new Rect(minX, minY, maxX - minX, maxY - minY)
+  }
+
+  val eye_rect: Rect = {
+    val minYt: Int = (left_eye ++ right_eye).map(_._2).min
+    val maxYt: Int = (left_eye ++ right_eye).map(_._2).max
+    val minY = minYt - (maxYt - minYt) / 2
+    val maxY = maxYt + (maxYt - minYt) / 2
+    val facePs = (face_hairline ++ face_contour_left ++ face_contour_right).filter { case (_, y) =>
+      minY <= y && y <= maxY
+    }
+    val minX = facePs.map(_._1).min
+    val maxX = facePs.map(_._1).max
+    new Rect(minX, minY, maxX - minX, maxY - minY)
+  }
+
+  val mouth_rect: Rect = {
+    val minY: Int = (upper_lip ++ lower_lip).map(_._2).min
+    val maxY: Int = (upper_lip ++ lower_lip).map(_._2).max
+    val facePs = (face_hairline ++ face_contour_left ++ face_contour_right).filter { case (_, y) =>
+      minY <= y && y <= maxY
+    }
+    val minX = facePs.map(_._1).min
+    val maxX = facePs.map(_._1).max
+    new Rect(minX, minY, maxX - minX, maxY - minY)
+  }
 
   def eye(pre: String): (Int, Int, Int) = {
     val x = landmark.getObj(s"${pre}_eye").getObj(s"${pre}_eye_pupil_center").getInt("x").toInt
@@ -114,5 +138,10 @@ object FacePP {
     val res = client.httpForm(url, form)
     println(res.getBody)
     Landmark(JSON.parse(res.getBody).asObj())
+  }
+
+  def main(args: Array[String]): Unit = {
+    //    FaceMain.watchAndCompare("E:\\Games\\PlayHome\\UserData\\Cap", "E:/ly3.jpg")
+    //    compare("E:/1.jpg", "E:/ly3.jpg")
   }
 }

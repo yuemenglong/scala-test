@@ -37,18 +37,23 @@ object FaceMain {
     Array(newName)
   })
 
-  def watchAndPickFace(dir: String): Unit = watch(dir, file => {
+  def watchAndPickFace(dir: String): Unit = watch(dir, f => pickFace(f.getAbsolutePath))
+
+  def pickFace(path: String): Array[String] = {
+    val file = new File(path)
     val landmark = FacePP.landmark(file.getAbsolutePath)
     val res = CV.drawLandmark(landmark, file.getAbsolutePath)
     Array(file.getAbsolutePath) ++ res
-  })
+  }
 
   def main(args: Array[String]): Unit = {
-//    compare("D:/pic/liuyan/ly1.jpg", "D:/pic/liuyan/ly3.jpg")
-//    return
-//    val p = "D:/pic/ly2.jpg"
-//    val landmark = FacePP.landmark(p)
-//    CV.drawLandmark(landmark, p)
-    watchAndPickFace("D:/pic/liuyan")
+    //    compare("D:/pic/liuyan/ly1.jpg", "D:/pic/liuyan/ly3.jpg")
+    //    return
+    val p = "E:\\Games\\PlayHome\\UserData\\Cap"
+    //    val p = "D:/pic/ly2.jpg"
+    new File(p).listFiles().filter(!_.isDirectory).map(_.getAbsolutePath).foreach(pickFace)
+    //    val dir = "E:\\Games\\PlayHome\\UserData\\Cap"
+    //    watchAndCompare(dir,"E:/ly3.jpg")
+    //    watchAndPickFace(dir)
   }
 }

@@ -13,6 +13,13 @@ object CV {
   val BLACK: Scalar = new Scalar(0, 0, 0)
   val WHITE: Scalar = new Scalar(255, 255, 255)
 
+  def splitPath(in: String): (String, String) = {
+    val Array(m) = """(.*)\.([^.]+)""".r.findAllMatchIn(in).toArray
+    val name = m.group(1)
+    val ext = m.group(2)
+    (name, ext)
+  }
+
   def outPath(in: String): String = {
     val Array(m) = """(.*)\.([^.]+)""".r.findAllMatchIn(in).toArray
     val name = m.group(1)
@@ -22,19 +29,43 @@ object CV {
   }
 
   def outFacePath(in: String): String = {
-    val Array(m) = """(.*)\.([^.]+)""".r.findAllMatchIn(in).toArray
-    val name = m.group(1)
-    val ext = m.group(2)
-    val outFace = s"${name}-out-face.${ext}"
-    outFace
+    val (name, ext) = splitPath(in)
+    s"${name}-out-face.${ext}"
+  }
+
+  def outEyePath(in: String): String = {
+    val (name, ext) = splitPath(in)
+    s"${name}-out-eye.${ext}"
+  }
+
+  def outMouthPath(in: String): String = {
+    val (name, ext) = splitPath(in)
+    s"${name}-out-mouth.${ext}"
+  }
+
+  def zoomWidth(in: Size, width: Int): Size = {
+    val height = (in.height * 1.0 / in.width * width).toInt
+    new Size(width, height)
+  }
+
+  def zoomHeight(in: Size, height: Int): Size = {
+    val width = (in.width * 1.0 / in.height * height).toInt
+    new Size(width, height)
   }
 
   def drawLandmark(landmark: Landmark, in: String, color: Scalar = RED): Array[String] = {
     val out = outPath(in)
     val outFace = outFacePath(in)
+    val outEye = outEyePath(in)
 
     {
       val mat = Imgcodecs.imread(in)
+      val eyeMat = new Mat(mat, landmark.eye_rect)
+      val newEyeSize = zoomWidth(eyeMat.size(), 1080)
+      val newEyeMat = new Mat
+      Imgproc.resize(eyeMat, newEyeMat, newEyeSize)
+      Imgcodecs.imwrite(outEye, newEyeMat)
+
       landmark.points.foreach { case (x, y) =>
         Imgproc.circle(mat, new Point(x, y), 1, color)
       }
@@ -45,9 +76,9 @@ object CV {
     }
 
     {
-      val size = new Size(landmark.width, landmark.height)
-      val left = landmark.minX
-      val top = landmark.minY
+      val size = new Size(landmark.face_rect.width, landmark.face_rect.height)
+      val left = landmark.face_rect.x
+      val top = landmark.face_rect.y
       val mat = new Mat(size, CvType.CV_64FC3, WHITE)
       landmark.points.foreach { case (x, y) =>
         val xx = x - left
@@ -66,7 +97,7 @@ object CV {
       Imgcodecs.imwrite(outFace, resized)
     }
 
-    Array(out, outFace)
+    Array(out, outFace, outEye)
   }
 
   def drawPoint(in: String, out: String, points: (Int, Int)*): Unit = {
