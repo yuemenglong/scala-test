@@ -38,7 +38,7 @@ object CV {
     s"${name}-out-eye.${ext}"
   }
 
-  def outMouthPath(in: String): String = {
+  def outMousePath(in: String): String = {
     val (name, ext) = splitPath(in)
     s"${name}-out-mouth.${ext}"
   }
@@ -57,14 +57,26 @@ object CV {
     val out = outPath(in)
     val outFace = outFacePath(in)
     val outEye = outEyePath(in)
+    val outMouse = outMousePath(in)
 
     {
       val mat = Imgcodecs.imread(in)
-      val eyeMat = new Mat(mat, landmark.eye_rect)
-      val newEyeSize = zoomWidth(eyeMat.size(), 1080)
-      val newEyeMat = new Mat
-      Imgproc.resize(eyeMat, newEyeMat, newEyeSize)
-      Imgcodecs.imwrite(outEye, newEyeMat)
+
+      {
+        val eyeMat = new Mat(mat, landmark.eye_rect)
+        val newEyeSize = zoomWidth(eyeMat.size(), 1080)
+        val newEyeMat = new Mat
+        Imgproc.resize(eyeMat, newEyeMat, newEyeSize)
+        Imgcodecs.imwrite(outEye, newEyeMat)
+      }
+
+      {
+        val mouseMat = new Mat(mat, landmark.mouth_rect)
+        val newMouseSize = zoomWidth(mouseMat.size(), 1080)
+        val newMouseMat = new Mat
+        Imgproc.resize(mouseMat, newMouseMat, newMouseSize)
+        Imgcodecs.imwrite(outMouse, newMouseMat)
+      }
 
       landmark.points.foreach { case (x, y) =>
         Imgproc.circle(mat, new Point(x, y), 1, color)
@@ -97,7 +109,7 @@ object CV {
       Imgcodecs.imwrite(outFace, resized)
     }
 
-    Array(out, outFace, outEye)
+    Array(out, outFace, outEye, outMouse)
   }
 
   def drawPoint(in: String, out: String, points: (Int, Int)*): Unit = {

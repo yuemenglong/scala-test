@@ -70,8 +70,10 @@ case class Landmark(root: JsonObj) {
   }
 
   val mouth_rect: Rect = {
-    val minY: Int = (upper_lip ++ lower_lip).map(_._2).min
-    val maxY: Int = (upper_lip ++ lower_lip).map(_._2).max
+    val minYt: Int = (upper_lip ++ lower_lip).map(_._2).min
+    val maxYt: Int = (upper_lip ++ lower_lip).map(_._2).max
+    val minY = minYt - (maxYt - minYt) / 2
+    val maxY = maxYt + (maxYt - minYt) / 2
     val facePs = (face_hairline ++ face_contour_left ++ face_contour_right).filter { case (_, y) =>
       minY <= y && y <= maxY
     }

@@ -47,7 +47,9 @@ object FaceMain {
   }
 
   def main(args: Array[String]): Unit = {
-    val p = "E:\\Games\\PlayHome\\UserData\\Cap"
-    watchAndPickFace(p)
+    val p = "D:/temp/wj.jpg"
+    pickFace(p)
+    //    val p = "E:\\Games\\PlayHome\\UserData\\Cap"
+    //    watchAndPickFace(p)
   }
 }
