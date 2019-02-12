@@ -47,13 +47,7 @@ object FaceMain {
   }
 
   def main(args: Array[String]): Unit = {
-    //    compare("D:/pic/liuyan/ly1.jpg", "D:/pic/liuyan/ly3.jpg")
-    //    return
     val p = "E:\\Games\\PlayHome\\UserData\\Cap"
-    //    val p = "D:/pic/ly2.jpg"
-    new File(p).listFiles().filter(!_.isDirectory).map(_.getAbsolutePath).foreach(pickFace)
-    //    val dir = "E:\\Games\\PlayHome\\UserData\\Cap"
-    //    watchAndCompare(dir,"E:/ly3.jpg")
-    //    watchAndPickFace(dir)
+    watchAndPickFace(p)
   }
 }
