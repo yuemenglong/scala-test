@@ -1,8 +1,11 @@
 package ml
 
+
+import org.apache.spark.ml.classification.LogisticRegression
 import org.apache.spark.ml.linalg.Vectors
 import org.apache.spark.ml.regression.LinearRegression
 import org.apache.spark.sql.SparkSession
+import org.tensorflow.{Graph, Session, Tensor, TensorFlow}
 
 case class Rating(userId: Int, movieId: Int, rating: Double, timestamp: Long)
 
@@ -11,7 +14,70 @@ object MLMain {
   val LABEL = "label"
   val PREDICTION = "prediction"
 
+
   def main(args: Array[String]): Unit = {
+    val g = new Graph()
+    try {
+      val value = "Hello from " + TensorFlow.version
+      // Construct the computation graph with a single operation, a constant
+      // named "MyConst" with a value "value".
+      try {
+        val t = Tensor.create(value.getBytes("UTF-8"))
+        try // The Java API doesn't yet include convenience functions for adding operations.
+        g.opBuilder("Const", "MyConst").setAttr("dtype", t.dataType).setAttr("value", t).build
+        finally if (t != null) t.close()
+      }
+      // Execute the "MyConst" operation in a Session.
+      try {
+        val s = new Session(g)
+        // Generally, there may be multiple output tensors,
+        // all of them must be closed to prevent resource leaks.
+        val output = s.runner.fetch("MyConst").run.get(0)
+        try
+          System.out.println(new String(output.bytesValue, "UTF-8"))
+        finally {
+          if (s != null) s.close()
+          if (output != null) output.close()
+        }
+      }
+    } finally if (g != null) g.close()
+  }
+
+  def logisticRegression(args: Array[String]): Unit = {
+    val session = SparkSession.builder().appName("ML").master("local[*]").getOrCreate()
+    import session.implicits._
+
+    val sc = session.sparkContext
+    val data = Array(
+      Array(1.0, 0.0, 0.0),
+      Array(0.0, 1.0, 0.0),
+      Array(0.0, 0.0, 1.0),
+      Array(1.0, 1.0, 1.0)
+    )
+    val df = sc.parallelize(data).map(arr => {
+      (arr(0), Vectors.dense(arr.drop(1)))
+    }).toDF(LABEL, FEATURES)
+
+    val lor = new LogisticRegression()
+      .setFeaturesCol(FEATURES)
+      .setLabelCol(LABEL)
+      .setRegParam(0.0)
+      .setElasticNetParam(0.0)
+      .setMaxIter(100)
+      .setTol(1e-6)
+      .setFitIntercept(true)
+
+    val model = lor.fit(df)
+    println("coefficients", model.coefficients)
+    println("intercept", model.intercept)
+
+    val trans = model.transform(df)
+    val predictions = trans.select(PREDICTION).rdd.map(_.getDouble(0))
+    val labels = trans.select(LABEL).rdd.map(_.getDouble(0))
+    labels.zip(predictions).take(100).foreach(println)
+  }
+
+  def linearRegression(args: Array[String]): Unit = {
     val session = SparkSession.builder().appName("ML").master("local[*]").getOrCreate()
     import session.implicits._
 
@@ -49,8 +115,8 @@ object MLMain {
       .setTol(1e-6)
 
     val model = lir.fit(training)
-    println(model.coefficients)
-    println(model.intercept)
+    println("coefficients", model.coefficients)
+    println("intercept", model.intercept)
 
     val trans = model.transform(test)
     val predictions = trans.select(PREDICTION).rdd.map(_.getDouble(0))
