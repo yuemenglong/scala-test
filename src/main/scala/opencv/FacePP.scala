@@ -1,18 +1,24 @@
 package opencv
 
-import java.io.File
+import java.io._
 
 import io.github.yuemenglong.http.HttpClient
 import io.github.yuemenglong.json.JSON
 import io.github.yuemenglong.json.parse.JsonObj
 import nu.pattern.OpenCV
 import org.opencv.core.Rect
+import sun.misc.BASE64Decoder
 
-case class FaceRect(root: JsonObj) {
-  val top: Int = root.getInt("top")
-  val left: Int = root.getInt("left")
-  val width: Int = root.getInt("width")
-  val height: Int = root.getInt("height")
+case class FaceRect(top: Int, left: Int, width: Int, height: Int) {
+  def toReqString = s"${top},${left},${width},${height}"
+}
+
+object FaceRect {
+  def apply(root: JsonObj): FaceRect = FaceRect(
+    root.getInt("top"),
+    root.getInt("left"),
+    root.getInt("width"),
+    root.getInt("height"))
 }
 
 case class Landmark(root: JsonObj) {
@@ -132,6 +138,40 @@ object FacePP {
     ret
   }
 
+  def detect(p: String): Array[FaceRect] = {
+    val url = "https://api-cn.faceplusplus.com/facepp/v3/detect"
+    val form = makeForm(
+      fileOrUrl(p, "image_file", "image_url")
+    )
+    val res = client.httpForm(url, form)
+    println(res.getBody)
+    val root = JSON.parse(res.getBody).asObj()
+    root.getArr("faces").array.map(jo => {
+      val rect = jo.asObj().getObj("face_rectangle")
+      FaceRect(rect)
+    })
+  }
+
+  def mergeface(p1: String, rect1: FaceRect, p2: String, rect2: FaceRect, mergeRate: Int = 50): String = {
+    val url = "https://api-cn.faceplusplus.com/imagepp/v1/mergeface"
+    val form = makeForm(
+      fileOrUrl(p1, "template_file", "template_url"),
+      fileOrUrl(p2, "merge_file", "merge_url"),
+      ("template_rectangle", rect1.toReqString),
+      ("merge_rectangle", rect2.toReqString)
+    )
+    val res = client.httpForm(url, form)
+    println(res.getBody)
+    val result = res.getBody.split(""""result":""")(1).trim.split(""""""")
+    result(1)
+    //    val re = """.*"result": "([^"]+)".*""".r
+    //    res.getBody match {
+    //      case re(_, result) => result
+    //      case _ => ""
+    //    }
+    //    JSON.parse(res.getBody).asObj().getStr("result")
+  }
+
   def landmark(p: String): Landmark = {
     val url = "https://api-cn.faceplusplus.com/facepp/v1/face/thousandlandmark"
     val form = makeForm("return_landmark" -> "all",
@@ -142,8 +182,42 @@ object FacePP {
     Landmark(JSON.parse(res.getBody).asObj())
   }
 
+  def base64ToImage(imgStr: String, imgFilePath: String) { // 对字节数组字符串进行Base64解码并生成图片
+    val decoder = new BASE64Decoder()
+    val b: Array[Byte] = decoder.decodeBuffer(imgStr).map {
+      case c if c < 0 => (c + 256).toByte
+      case c => c
+    }
+    val out = new FileOutputStream(imgFilePath)
+    out.write(b)
+    out.flush()
+    out.close()
+  }
+
+
   def main(args: Array[String]): Unit = {
     //    FaceMain.watchAndCompare("E:\\Games\\PlayHome\\UserData\\Cap", "E:/ly3.jpg")
     //    compare("E:/1.jpg", "E:/ly3.jpg")
+
+    val p = "https://timgsa.baidu.com/timg?image&quality=80&size=b9999_10000&sec=1553252618968&di=b65c6c70de911b238450a2515a13ed35&imgtype=0&src=http%3A%2F%2Fimage2.sina.com.cn%2Fent%2Fd%2F2005-01-18%2FU92P28T3D633859F326DT20050118143536.jpg"
+    val res = detect(p)
+    val b64 = mergeface(p, res(0), p, res(1))
+    base64ToImage(b64, "D:/out2.jpg")
+
+    //    val s = new BufferedReader(new InputStreamReader(new FileInputStream("D:/out.txt")))
+    //    val json = s.readLine()
+    //    val result = JSON.parse(json).asObj().getStr("result")
+    //    println(result)
   }
+
+  /*
+  * curl -X POST "https://api-cn.faceplusplus.com/imagepp/v1/mergeface" \
+-F "api_key=uqngbdsbwX9CsbqPeObfwzzlaUJpPDJC"  \
+-F "api_secret=Q5kEO5lhl32wvb3mMhY0AIu90nEAob1o"  \
+-F "template_url=https://timgsa.baidu.com/timg?image&quality=80&size=b9999_10000&sec=1553252618968&di=b65c6c70de911b238450a2515a13ed35&imgtype=0&src=http%3A%2F%2Fimage2.sina.com.cn%2Fent%2Fd%2F2005-01-18%2FU92P28T3D633859F326DT20050118143536.jpg" \
+-F "template_rectangle=126,286,62,62" \
+-F "merge_url=https://timgsa.baidu.com/timg?image&quality=80&size=b9999_10000&sec=1553252618968&di=b65c6c70de911b238450a2515a13ed35&imgtype=0&src=http%3A%2F%2Fimage2.sina.com.cn%2Fent%2Fd%2F2005-01-18%2FU92P28T3D633859F326DT20050118143536.jpg" \
+-F "merge_rectangle=171,200,57,57" \
+-F "merge_rate=70"
+  * */
 }

@@ -12,7 +12,6 @@ object Main {
 
     // 获得一个DStream负责连接 监听端口:地址
     val lines: DStream[String] = ssc.socketTextStream("", 0);
-    lines.compute()
 
     // 对每一行数据执行Split操作
     val words = lines.flatMap(_.split(" "));
