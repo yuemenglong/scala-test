@@ -5,6 +5,8 @@ import org.opencv.core._
 import org.opencv.imgcodecs.Imgcodecs
 import org.opencv.imgproc.Imgproc
 
+import scala.collection.mutable.ArrayBuffer
+
 object CV {
   OpenCV.loadLocally()
   val BLUE: Scalar = new Scalar(255, 0, 0)
@@ -58,36 +60,50 @@ object CV {
     val outFace = outFacePath(in)
     val outEye = outEyePath(in)
     val outMouse = outMousePath(in)
+    val ret = new ArrayBuffer[String]() ++ Array(out, outFace, outEye, outMouse)
 
     {
       val mat = Imgcodecs.imread(in)
+      println(mat.size())
 
-      {
+      try {
+        val faceMat = mat.clone()
+        landmark.points.foreach { case (x, y) =>
+          Imgproc.circle(faceMat, new Point(x, y), 1, color)
+        }
+        landmark.eyes.foreach { case (x, y, r) =>
+          Imgproc.circle(faceMat, new Point(x, y), r, color)
+        }
+        Imgcodecs.imwrite(out, faceMat)
+      } catch {
+        case e: Throwable => println(s"Draw Point Fail, ${e}")
+          ret -= out
+      }
+
+      try {
         val eyeMat = new Mat(mat, landmark.eye_rect)
         val newEyeSize = zoomWidth(eyeMat.size(), 1080)
         val newEyeMat = new Mat
         Imgproc.resize(eyeMat, newEyeMat, newEyeSize)
         Imgcodecs.imwrite(outEye, newEyeMat)
+      } catch {
+        case e: Throwable => println(s"Pick Eye Fail, ${e}")
+          ret -= outEye
       }
 
-      {
+      try {
         val mouseMat = new Mat(mat, landmark.mouth_rect)
         val newMouseSize = zoomWidth(mouseMat.size(), 1080)
         val newMouseMat = new Mat
         Imgproc.resize(mouseMat, newMouseMat, newMouseSize)
         Imgcodecs.imwrite(outMouse, newMouseMat)
+      } catch {
+        case e: Throwable => println(s"Pick Mouse Fail, ${e}")
+          ret -= outMouse
       }
-
-      landmark.points.foreach { case (x, y) =>
-        Imgproc.circle(mat, new Point(x, y), 1, color)
-      }
-      landmark.eyes.foreach { case (x, y, r) =>
-        Imgproc.circle(mat, new Point(x, y), r, color)
-      }
-      Imgcodecs.imwrite(out, mat)
     }
 
-    {
+    try {
       val size = new Size(landmark.face_rect.width, landmark.face_rect.height)
       val left = landmark.face_rect.x
       val top = landmark.face_rect.y
@@ -107,9 +123,12 @@ object CV {
       val resizeWidth = (size.width * 1.0 / size.height * resizeHeight).toInt
       Imgproc.resize(mat, resized, new Size(resizeWidth, resizeHeight))
       Imgcodecs.imwrite(outFace, resized)
+    } catch {
+      case e: Throwable => println(s"Pick Face Fail, ${e}")
+        ret -= outFace
     }
 
-    Array(out, outFace, outEye, outMouse)
+    ret.toArray
   }
 
   def drawPoint(in: String, out: String, points: (Int, Int)*): Unit = {
