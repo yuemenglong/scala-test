@@ -1,28 +1,58 @@
 package test
 
-import org.apache.spark.streaming.dstream.{DStream, ReceiverInputDStream}
-import org.apache.spark.streaming.{Seconds, StreamingContext}
-import org.apache.spark.{SparkConf, SparkContext}
+
+import java.io._
+
+import io.github.yuemenglong.json.JSON
+import io.github.yuemenglong.orm.Orm
+import io.github.yuemenglong.orm.lang.anno.{Entity, Id}
+import io.github.yuemenglong.orm.lang.types.Types.DateTime
+
+import sun.misc.Unsafe
+
+@Entity
+class Pusher {
+  @Id
+  var id: Integer = _
+  var province: String = _
+  var city: String = _
+  var country: String = _
+  var site: String = _
+  var site_code: String = _
+  var site_operation_id: String = _
+  var device_name: String = _
+  var device_vender: String = _
+  var device_model: String = _
+  var monitoring_device: String = _
+  var monitoring_point: String = _
+  var date: DateTime = _
+  var measured_value: String = _
+  var unit: String = _
+  var import_time: DateTime = _
+  var data_source: String = _
+}
 
 object Main {
 
+
+  private val U = getUnsafeInstance
+
+  //使用方法
+  @throws[SecurityException]
+  @throws[NoSuchFieldException]
+  @throws[IllegalArgumentException]
+  @throws[IllegalAccessException]
+  private def getUnsafeInstance: Unsafe = {
+    val theUnsafeInstance = classOf[Unsafe].getDeclaredField("theUnsafe")
+    theUnsafeInstance.setAccessible(true)
+    theUnsafeInstance.get(classOf[Unsafe]).asInstanceOf[Unsafe]
+  }
+
   def main(args: Array[String]): Unit = {
-    val conf = new SparkConf()
-    val ssc = new StreamingContext(conf, Seconds(1));
-
-    // 获得一个DStream负责连接 监听端口:地址
-    val lines: DStream[String] = ssc.socketTextStream("", 0);
-
-    // 对每一行数据执行Split操作
-    val words = lines.flatMap(_.split(" "));
-    // 统计word的数量
-    val pairs = words.map(word => (word, 1));
-    val wordCounts = pairs.reduceByKey(_ + _);
-
-    // 输出结果
-    wordCounts.print();
-
-    ssc.start(); // 开始
-    ssc.awaitTermination(); // 计算完毕退出
+    val mem: Long = U.allocateMemory(1024 * 1024 * 1024)
+    (0 to 1024 * 1024 * 256).foreach(i => {
+      U.putInt(mem + i * 4, 1)
+    })
+    Thread.sleep(10000)
   }
 }
